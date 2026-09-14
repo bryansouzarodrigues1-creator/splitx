@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#070a0d">
+  <meta name="description" content="Divida arquivos enormes direto no navegador, com privacidade e velocidade.">
+  <title>SplitX — arquivos grandes, sob controle</title>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23070a0d'/%3E%3Cpath d='M8 9h7v5H8zm9 9h7v5h-7z' fill='%23ccff00'/%3E%3Cpath d='M15 11.5h2v9h-2z' fill='%23ccff00'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <header class="nav">
+    <a class="brand" href="#" aria-label="SplitX início"><span class="brand-mark"><i></i><i></i></span>split<span>x</span></a>
+    <div class="nav-right"><span class="privacy-pill"><b></b> 100% local</span><button class="ghost" id="howBtn">Como funciona</button></div>
+  </header>
+
+  <main>
+    <section class="hero">
+      <div class="eyebrow"><span>01</span> MOTOR DE DIVISÃO INTELIGENTE</div>
+      <h1>Arquivos gigantes.<br><em>Zero espera.</em></h1>
+      <p class="lead">Divida ZIPs, vídeos, PDFs e qualquer arquivo pesado direto no seu dispositivo. Sem upload. Sem cadastro. Sem limite artificial.</p>
+
+      <section class="workspace" aria-label="Divisor de arquivos">
+        <div class="workspace-top"><span>NOVO PROCESSAMENTO</span><span class="status"><i></i> MOTOR PRONTO</span></div>
+        <div class="mode-tabs" style="grid-template-columns:repeat(3,1fr)" role="tablist"><button class="active" id="splitTab" role="tab">Dividir arquivo</button><button id="joinTab" role="tab">Juntar partes</button><button id="pdfTab" role="tab">PDF Studio <sup>NOVO</sup></button></div>
+        <div id="splitMode">
+        <div class="dropzone" id="dropzone" tabindex="0" role="button" aria-label="Escolher ou soltar arquivo">
+          <input type="file" id="fileInput" hidden>
+          <div class="upload-icon"><span>↑</span></div>
+          <h2>Solte seu arquivo aqui</h2>
+          <p>ou <u>escolha no dispositivo</u></p>
+          <div class="formats"><span>ZIP</span><span>7Z</span><span>PDF</span><span>XLSX</span><span>MP4</span><span>QUALQUER FORMATO</span></div>
+        </div>
+
+        <div class="file-panel" id="filePanel" hidden>
+          <div class="file-row">
+            <div class="file-icon" id="fileExt">FILE</div>
+            <div class="file-meta"><strong id="fileName">arquivo.zip</strong><span id="fileSize">0 MB</span></div>
+            <button class="remove" id="removeBtn" aria-label="Remover arquivo">×</button>
+          </div>
+          <div class="settings">
+            <label>Tamanho de cada parte
+              <div class="size-control"><input id="partSize" type="number" min="1" value="200"><select id="unit"><option value="1048576">MB</option><option value="1073741824">GB</option></select></div>
+            </label>
+            <div class="summary"><span>O SplitX vai gerar</span><strong id="partsCount">1 parte</strong><small id="recommendation">Configuração recomendada</small></div>
+          </div>
+          <button class="split-btn" id="splitBtn"><span>Dividir arquivo agora</span><b>→</b></button>
+        </div>
+
+        <div class="progress-panel" id="progressPanel" hidden>
+          <div class="progress-head"><strong id="progressTitle">Preparando as partes</strong><span id="progressPct">0%</span></div>
+          <div class="bar"><i id="progressBar"></i></div>
+          <p id="progressText">O arquivo continua somente no seu dispositivo.</p>
+          <div class="binary-note"><b>PARTES BINÁRIAS REAIS</b><span>Cada .part é baixado como dados binários, nunca como texto. Junte todas para recuperar o arquivo original.</span></div>
+          <div class="results" id="results"></div>
+          <button class="batch-btn" id="batchBtn" hidden>Baixar todas as partes <span>↓</span></button>
+        </div>
+        </div>
+        <div id="joinMode" hidden>
+          <div class="dropzone join-drop" id="joinDrop" tabindex="0" role="button" aria-label="Escolher todas as partes">
+            <input type="file" id="partsInput" multiple hidden>
+            <div class="upload-icon join-icon"><span>↗</span></div><h2>Selecione todas as partes</h2>
+            <p>O SplitX reconhece e organiza a sequência automaticamente</p>
+            <div class="formats"><span>.PART001</span><span>.PART002</span><span>.PART003</span><span>...</span></div>
+          </div>
+          <div class="join-panel" id="joinPanel" hidden>
+            <div class="join-summary"><div><small>ARQUIVO DETECTADO</small><strong id="joinName">arquivo.zip</strong></div><div><small>SEQUÊNCIA</small><strong id="joinCount">0 partes</strong></div><div><small>TAMANHO FINAL</small><strong id="joinSize">0 MB</strong></div></div>
+            <div class="sequence" id="sequence"></div><p class="join-warning" id="joinWarning"></p>
+            <button class="split-btn" id="joinBtn"><span>Reconstruir arquivo original</span><b>↗</b></button>
+            <button class="text-btn" id="clearJoin">Escolher outras partes</button>
+          </div>
+        </div>
+        <div id="pdfMode" hidden>
+          <div class="pdf-head"><span class="pdf-kicker">DOCUMENTOS PRIVADOS · PROCESSAMENTO LOCAL</span><h2>PDF Studio</h2><p>Converta e una documentos sem enviar nenhum arquivo para a internet.</p></div>
+          <div class="pdf-tools" id="pdfTools">
+            <button data-pdf-tool="merge"><i>⇉</i><strong>Unir PDF</strong><span>Combine e reorganize vários PDFs</span></button>
+            <button data-pdf-tool="images"><i>▧</i><strong>Imagens → PDF</strong><span>JPG, PNG e WebP em um documento</span></button>
+            <button data-pdf-tool="extract"><i>⌗</i><strong>PDF → imagens</strong><span>Exporte páginas em alta qualidade</span></button>
+            <button data-pdf-tool="word"><i>W</i><strong>Word → PDF <sup>BETA</sup></strong><span>Converta documentos DOCX localmente</span></button>
+          </div>
+          <section class="pdf-work" id="pdfWork" hidden>
+            <button class="pdf-back" id="pdfBack">← Todas as ferramentas</button>
+            <div class="pdf-work-title"><div><small id="pdfToolKicker">PDF STUDIO</small><h3 id="pdfToolTitle">Unir PDF</h3><p id="pdfToolDesc"></p></div><span class="local-seal">● LOCAL</span></div>
+            <div class="pdf-drop" id="pdfDrop" tabindex="0" role="button"><input id="pdfInput" type="file" hidden><b>+</b><strong id="pdfDropTitle">Escolher arquivos</strong><span id="pdfDropHint"></span></div>
+            <div class="pdf-file-list" id="pdfFileList"></div>
+            <button class="split-btn" id="pdfRun" hidden><span id="pdfRunLabel">Processar</span><b>→</b></button>
+            <div class="pdf-status" id="pdfStatus" hidden><div><strong id="pdfStatusTitle">Processando</strong><span id="pdfStatusPct">0%</span></div><div class="bar"><i id="pdfStatusBar"></i></div><p id="pdfStatusText">O documento não sai do seu dispositivo.</p></div>
+            <div class="pdf-results" id="pdfResults"></div>
+          </section>
+        </div>
+      </section>
+    </section>
+
+    <section class="proof">
+      <article><strong>0<span>s</span></strong><p>de upload para<br>qualquer servidor</p></article>
+      <article><strong>∞</strong><p>sem limite artificial<br>de tamanho</p></article>
+      <article><strong>100<span>%</span></strong><p>processado no<br>seu dispositivo</p></article>
+    </section>
+
+    <section class="how" id="how">
+      <div><span class="section-number">02</span><h2>Simples porque<br>deve ser simples.</h2></div>
+      <ol><li><b>01</b><strong>Escolha</strong><p>Selecione qualquer arquivo, mesmo com vários GB.</p></li><li><b>02</b><strong>Ajuste</strong><p>Use a sugestão inteligente ou defina o tamanho.</p></li><li><b>03</b><strong>Baixe</strong><p>Receba as partes sem o arquivo sair do aparelho.</p></li></ol>
+    </section>
+  </main>
+
+  <dialog id="infoDialog"><button id="closeDialog" aria-label="Fechar">×</button><span class="dialog-kicker">PRIVACIDADE POR ARQUITETURA</span><h2>Seu arquivo não viaja.</h2><p>O SplitX usa a API de arquivos do próprio navegador para recortar e reunir o conteúdo em blocos. Nada é enviado, armazenado ou analisado por um servidor.</p><p>As partes podem ser reconstruídas pelo próprio SplitX ou pelas instruções incluídas no processamento.</p></dialog>
+  <script src="./app-v2.js"></script>
+  <script src="./no-manifest.js"></script>
+  <script type="module" src="./pdf-tools.js"></script>
+</body>
+</html>
