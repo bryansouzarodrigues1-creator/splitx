@@ -1,0 +1,305 @@
+const q = (s) => document.querySelector(s);
+const toolConfig = {
+  merge: { title: 'Unir PDF', desc: 'Combine PDFs na ordem que quiser. Use as setas para reorganizar.', accept: '.pdf,application/pdf', multiple: true, drop: 'Escolher arquivos PDF', hint: 'Selecione dois ou mais documentos', run: 'Unir documentos' },
+  images: { title: 'Imagens → PDF', desc: 'Transforme imagens em páginas A4, mantendo proporção e orientação.', accept: 'image/jpeg,image/png,image/webp', multiple: true, drop: 'Escolher imagens', hint: 'JPG, PNG ou WebP · várias imagens', run: 'Criar PDF' },
+  extract: { title: 'PDF → imagens', desc: 'Exporte todas as páginas como imagens JPG em alta qualidade.', accept: '.pdf,application/pdf', multiple: false, drop: 'Escolher um PDF', hint: 'As páginas serão reunidas em um ZIP', run: 'Converter páginas' },
+  word: { title: 'Word → PDF', desc: 'Conversão local de DOCX com texto, títulos e parágrafos. Layouts complexos podem variar.', accept: '.docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document', multiple: false, drop: 'Escolher documento Word', hint: 'Formato DOCX · motor Beta', run: 'Converter para PDF' }
+};
+let activeTool = null;
+let selected = [];
+let resultUrls = [];
+let pdfLibPromise;
+let pdfJsPromise;
+
+const formatBytes = (n) => {
+  const units = ['B', 'KB', 'MB', 'GB'];
+  let i = 0;
+  while (n >= 1024 && i < units.length - 1) { n /= 1024; i++; }
+  return `${n >= 10 ? n.toFixed(0) : n.toFixed(1)} ${units[i]}`;
+};
+
+const loadPdfLib = () => pdfLibPromise ||= import('./vendor/pdf-lib.esm.min.js');
+const loadPdfJs = async () => {
+  if (!pdfJsPromise) {
+    pdfJsPromise = import('./vendor/pdf.min.mjs').then((lib) => {
+      lib.GlobalWorkerOptions.workerSrc = new URL('./vendor/pdf.worker.min.mjs', import.meta.url).href;
+      return lib;
+    });
+  }
+  return pdfJsPromise;
+};
+const loadJsZip = () => new Promise((resolve, reject) => {
+  if (window.JSZip) return resolve(window.JSZip);
+  const script = document.createElement('script');
+  script.src = './vendor/jszip.min.js';
+  script.onload = () => resolve(window.JSZip);
+  script.onerror = () => reject(new Error('Não foi possível carregar o motor ZIP.'));
+  document.head.append(script);
+});
+
+function showMainMode(mode) {
+  q('#splitMode').hidden = mode !== 'split';
+  q('#joinMode').hidden = mode !== 'join';
+  q('#pdfMode').hidden = mode !== 'pdf';
+  q('#splitTab').classList.toggle('active', mode === 'split');
+  q('#joinTab').classList.toggle('active', mode === 'join');
+  q('#pdfTab').classList.toggle('active', mode === 'pdf');
+}
+q('#pdfTab').addEventListener('click', () => showMainMode('pdf'));
+q('#splitTab').addEventListener('click', () => showMainMode('split'));
+q('#joinTab').addEventListener('click', () => showMainMode('join'));
+
+q('#pdfTools').addEventListener('click', (event) => {
+  const button = event.target.closest('[data-pdf-tool]');
+  if (button) openTool(button.dataset.pdfTool);
+});
+
+function openTool(name) {
+  activeTool = name;
+  selected = [];
+  clearResults();
+  const config = toolConfig[name];
+  q('#pdfTools').hidden = true;
+  q('#pdfWork').hidden = false;
+  q('#pdfToolTitle').textContent = config.title;
+  q('#pdfToolDesc').textContent = config.desc;
+  q('#pdfDropTitle').textContent = config.drop;
+  q('#pdfDropHint').textContent = config.hint;
+  q('#pdfRunLabel').textContent = config.run;
+  q('#pdfInput').accept = config.accept;
+  q('#pdfInput').multiple = config.multiple;
+  q('#pdfInput').value = '';
+  q('#pdfRun').hidden = true;
+  q('#pdfStatus').hidden = true;
+  renderFiles();
+}
+
+q('#pdfBack').onclick = () => {
+  activeTool = null;
+  selected = [];
+  clearResults();
+  q('#pdfWork').hidden = true;
+  q('#pdfTools').hidden = false;
+};
+
+const pdfDrop = q('#pdfDrop');
+const pdfInput = q('#pdfInput');
+pdfDrop.onclick = () => pdfInput.click();
+pdfDrop.onkeydown = (e) => {
+  if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); pdfInput.click(); }
+};
+pdfInput.onchange = () => acceptFiles(pdfInput.files);
+['dragenter', 'dragover'].forEach((name) => pdfDrop.addEventListener(name, (e) => { e.preventDefault(); pdfDrop.classList.add('drag'); }));
+['dragleave', 'drop'].forEach((name) => pdfDrop.addEventListener(name, (e) => { e.preventDefault(); pdfDrop.classList.remove('drag'); }));
+pdfDrop.addEventListener('drop', (e) => acceptFiles(e.dataTransfer.files));
+
+function acceptFiles(fileList) {
+  if (!activeTool) return;
+  const files = [...fileList];
+  selected = toolConfig[activeTool].multiple ? [...selected, ...files] : files.slice(0, 1);
+  renderFiles();
+}
+
+function renderFiles() {
+  const list = q('#pdfFileList');
+  list.innerHTML = '';
+  selected.forEach((file, index) => {
+    const row = document.createElement('div');
+    row.className = 'pdf-file';
+    row.innerHTML = `<i>${String(index + 1).padStart(2, '0')}</i><div><strong></strong><small>${formatBytes(file.size)}</small></div><nav><button data-up aria-label="Mover para cima">↑</button><button data-down aria-label="Mover para baixo">↓</button><button data-remove aria-label="Remover">×</button></nav>`;
+    row.querySelector('strong').textContent = file.name;
+    row.querySelector('[data-up]').onclick = () => move(index, -1);
+    row.querySelector('[data-down]').onclick = () => move(index, 1);
+    row.querySelector('[data-remove]').onclick = () => { selected.splice(index, 1); renderFiles(); };
+    list.append(row);
+  });
+  q('#pdfRun').hidden = selected.length < (activeTool === 'merge' ? 2 : 1);
+}
+
+function move(index, direction) {
+  const target = index + direction;
+  if (target < 0 || target >= selected.length) return;
+  [selected[index], selected[target]] = [selected[target], selected[index]];
+  renderFiles();
+}
+
+function setProgress(percent, title, text) {
+  q('#pdfStatus').hidden = false;
+  q('#pdfStatusPct').textContent = `${Math.round(percent)}%`;
+  q('#pdfStatusBar').style.width = `${percent}%`;
+  q('#pdfStatusTitle').textContent = title;
+  if (text) q('#pdfStatusText').textContent = text;
+}
+
+function clearResults() {
+  resultUrls.forEach(URL.revokeObjectURL);
+  resultUrls = [];
+  q('#pdfResults').innerHTML = '';
+}
+
+function offerDownload(blob, filename, label = 'Arquivo pronto') {
+  const url = URL.createObjectURL(blob);
+  resultUrls.push(url);
+  const row = document.createElement('div');
+  row.className = 'pdf-download';
+  row.innerHTML = `<div><strong></strong><span></span></div><a>BAIXAR</a>`;
+  row.querySelector('strong').textContent = label;
+  row.querySelector('span').textContent = `${filename} · ${formatBytes(blob.size)}`;
+  const link = row.querySelector('a');
+  link.href = url;
+  link.download = filename;
+  q('#pdfResults').append(row);
+}
+
+q('#pdfRun').onclick = async () => {
+  if (!activeTool || !selected.length) return;
+  clearResults();
+  q('#pdfRun').disabled = true;
+  setProgress(3, 'Preparando motor', 'Tudo acontece somente neste dispositivo.');
+  try {
+    if (activeTool === 'merge') await mergePdfs();
+    if (activeTool === 'images') await imagesToPdf();
+    if (activeTool === 'extract') await pdfToImages();
+    if (activeTool === 'word') await wordToPdf();
+    setProgress(100, 'Concluído', 'Seu arquivo está pronto e nenhum documento foi enviado.');
+  } catch (error) {
+    console.error(error);
+    q('#pdfResults').innerHTML = `<div class="pdf-error">Não foi possível processar este arquivo. Ele pode estar protegido, corrompido ou usar um recurso ainda não suportado.</div>`;
+    setProgress(0, 'Processamento interrompido', error.message || 'Verifique os arquivos e tente novamente.');
+  } finally {
+    q('#pdfRun').disabled = false;
+  }
+};
+
+async function mergePdfs() {
+  const { PDFDocument } = await loadPdfLib();
+  const output = await PDFDocument.create();
+  for (let i = 0; i < selected.length; i++) {
+    setProgress(8 + (i / selected.length) * 75, `Lendo PDF ${i + 1} de ${selected.length}`);
+    const source = await PDFDocument.load(await selected[i].arrayBuffer());
+    const pages = await output.copyPages(source, source.getPageIndices());
+    pages.forEach((page) => output.addPage(page));
+  }
+  setProgress(88, 'Gerando documento final');
+  const bytes = await output.save({ useObjectStreams: true });
+  offerDownload(new Blob([bytes], { type: 'application/pdf' }), 'SplitX-unido.pdf', `${output.getPageCount()} páginas unidas`);
+}
+
+async function imageAsJpeg(file) {
+  const bitmap = await createImageBitmap(file);
+  const canvas = document.createElement('canvas');
+  canvas.width = bitmap.width;
+  canvas.height = bitmap.height;
+  const ctx = canvas.getContext('2d', { alpha: false });
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.drawImage(bitmap, 0, 0);
+  bitmap.close();
+  return new Uint8Array(await (await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.94))).arrayBuffer());
+}
+
+async function imagesToPdf() {
+  const { PDFDocument } = await loadPdfLib();
+  const output = await PDFDocument.create();
+  const A4 = [595.28, 841.89];
+  for (let i = 0; i < selected.length; i++) {
+    setProgress(8 + (i / selected.length) * 78, `Convertendo imagem ${i + 1} de ${selected.length}`);
+    const image = await output.embedJpg(await imageAsJpeg(selected[i]));
+    const landscape = image.width > image.height;
+    const pageSize = landscape ? [A4[1], A4[0]] : A4;
+    const page = output.addPage(pageSize);
+    const margin = 24;
+    const scale = Math.min((pageSize[0] - margin * 2) / image.width, (pageSize[1] - margin * 2) / image.height);
+    const width = image.width * scale;
+    const height = image.height * scale;
+    page.drawImage(image, { x: (pageSize[0] - width) / 2, y: (pageSize[1] - height) / 2, width, height });
+  }
+  const bytes = await output.save({ useObjectStreams: true });
+  offerDownload(new Blob([bytes], { type: 'application/pdf' }), 'SplitX-imagens.pdf', `${selected.length} imagens convertidas`);
+}
+
+async function pdfToImages() {
+  const pdfjs = await loadPdfJs();
+  const JSZip = await loadJsZip();
+  const documentData = new Uint8Array(await selected[0].arrayBuffer());
+  const pdf = await pdfjs.getDocument({ data: documentData }).promise;
+  const zip = new JSZip();
+  for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber++) {
+    setProgress(8 + ((pageNumber - 1) / pdf.numPages) * 80, `Renderizando página ${pageNumber} de ${pdf.numPages}`);
+    const page = await pdf.getPage(pageNumber);
+    const viewport = page.getViewport({ scale: 1.8 });
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.ceil(viewport.width);
+    canvas.height = Math.ceil(viewport.height);
+    const context = canvas.getContext('2d', { alpha: false });
+    context.fillStyle = '#ffffff';
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    await page.render({ canvasContext: context, viewport }).promise;
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.92));
+    zip.file(`pagina-${String(pageNumber).padStart(3, '0')}.jpg`, blob);
+    page.cleanup();
+  }
+  setProgress(92, 'Empacotando imagens');
+  const result = await zip.generateAsync({ type: 'blob', compression: 'STORE' });
+  offerDownload(result, 'SplitX-paginas.zip', `${pdf.numPages} páginas em JPG`);
+  await pdf.destroy();
+}
+
+function cleanWordText(text) {
+  return text.replace(/[“”]/g, '"').replace(/[‘’]/g, "'").replace(/[–—]/g, '-').replace(/…/g, '...').replace(/[^\x20-\xFF]/g, '');
+}
+
+function wrapText(text, font, size, maxWidth) {
+  const words = cleanWordText(text).split(/\s+/).filter(Boolean);
+  const lines = [];
+  let line = '';
+  for (const word of words) {
+    const candidate = line ? `${line} ${word}` : word;
+    if (font.widthOfTextAtSize(candidate, size) <= maxWidth) line = candidate;
+    else { if (line) lines.push(line); line = word; }
+  }
+  if (line) lines.push(line);
+  return lines;
+}
+
+async function wordToPdf() {
+  const JSZip = await loadJsZip();
+  const { PDFDocument, StandardFonts, rgb } = await loadPdfLib();
+  setProgress(15, 'Lendo estrutura do DOCX');
+  const archive = await JSZip.loadAsync(selected[0]);
+  const documentEntry = archive.file('word/document.xml');
+  if (!documentEntry) throw new Error('Este arquivo não contém um documento DOCX válido.');
+  const xml = new DOMParser().parseFromString(await documentEntry.async('text'), 'application/xml');
+  const paragraphs = [...xml.getElementsByTagNameNS('*', 'p')].map((paragraph) => {
+    const text = [...paragraph.getElementsByTagNameNS('*', 't')].map((node) => node.textContent).join('');
+    const styleNode = paragraph.getElementsByTagNameNS('*', 'pStyle')[0];
+    const style = styleNode?.getAttribute('w:val') || styleNode?.getAttribute('val') || '';
+    return { text, heading: /title|heading|titulo|ttulo/i.test(style) };
+  });
+  if (!paragraphs.some((p) => p.text.trim())) throw new Error('O documento não contém texto reconhecível.');
+  setProgress(45, 'Montando páginas');
+  const output = await PDFDocument.create();
+  const regular = await output.embedFont(StandardFonts.Helvetica);
+  const bold = await output.embedFont(StandardFonts.HelveticaBold);
+  const width = 595.28, height = 841.89, margin = 52;
+  let page = output.addPage([width, height]);
+  let y = height - margin;
+  for (let i = 0; i < paragraphs.length; i++) {
+    const paragraph = paragraphs[i];
+    const size = paragraph.heading ? 18 : 11;
+    const font = paragraph.heading ? bold : regular;
+    const lineHeight = size * 1.45;
+    const lines = paragraph.text.trim() ? wrapText(paragraph.text, font, size, width - margin * 2) : [''];
+    for (const line of lines) {
+      if (y < margin + lineHeight) { page = output.addPage([width, height]); y = height - margin; }
+      if (line) page.drawText(line, { x: margin, y, size, font, color: rgb(0.08, 0.08, 0.08) });
+      y -= lineHeight;
+    }
+    y -= paragraph.heading ? 8 : 4;
+    if (i % 20 === 0) setProgress(45 + (i / paragraphs.length) * 38, `Formatando parágrafo ${i + 1} de ${paragraphs.length}`);
+  }
+  setProgress(90, 'Gerando PDF');
+  const bytes = await output.save({ useObjectStreams: true });
+  const name = selected[0].name.replace(/\.docx$/i, '') + '.pdf';
+  offerDownload(new Blob([bytes], { type: 'application/pdf' }), name, `${output.getPageCount()} páginas convertidas`);
+}
