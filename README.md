@@ -1,33 +1,23 @@
 # SplitX
 
-Ferramenta privada e local-first para trabalhar com arquivos grandes diretamente no navegador.
+Divida e junte arquivos grandes ou use as ferramentas de PDF direto no navegador. Os arquivos não são enviados para um servidor.
 
-## Recursos
+## Publicar no Netlify
 
-- Divisão binária de arquivos grandes em partes numeradas.
-- Reconstrução das partes sem alterar os bytes originais.
-- União e reordenação de PDFs.
-- Conversão de imagens JPG, PNG e WebP para PDF.
-- Conversão de páginas PDF para imagens JPG em ZIP.
-- Conversão experimental de DOCX para PDF.
+1. Importe este repositório no Netlify.
+2. O Netlify usará automaticamente as configurações de `netlify.toml`.
+3. Publique o site.
 
-Os arquivos são processados no próprio dispositivo; o SplitX não precisa enviá-los para um servidor.
+Configuração já definida:
 
-## Preparação local
+- Comando: `npm run build`
+- Pasta publicada: `dist`
+- Node.js: versão 20
+
+## Rodar no computador
 
 ```bash
 npm install
 npm run build
-```
-
-Depois, sirva a pasta `dist` com um servidor HTTP local. Exemplo:
-
-```bash
 npx serve dist
 ```
-
-As bibliotecas grandes ficam fora do Git e são copiadas automaticamente de `node_modules` para `dist/vendor` durante o build.
-
-## Site
-
-<https://splitx-fast.bryansouzarodrigues0.chatgpt.site>
