@@ -2,10 +2,9 @@
   "name": "splitx",
   "version": "1.0.0",
   "private": true,
-  "description": "Divisor e reconstrutor local de arquivos com ferramentas PDF no navegador.",
+  "description": "Divida, junte e converta arquivos no navegador.",
   "scripts": {
-    "prepare:vendor": "node scripts/prepare-vendor.mjs",
-    "build": "npm run prepare:vendor"
+    "build": "node scripts/prepare-vendor.mjs"
   },
   "dependencies": {
     "jszip": "3.10.1",
