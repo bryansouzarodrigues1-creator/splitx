@@ -2,6 +2,8 @@
 
 Divida e junte arquivos grandes ou use as ferramentas de PDF direto no navegador. Os arquivos não são enviados para um servidor.
 
+O site também pode ser instalado e usado offline depois da primeira visita.
+
 ## Publicar no Netlify
 
 1. Importe este repositório no Netlify.
@@ -13,6 +15,8 @@ Configuração já definida:
 - Comando: `npm run build`
 - Pasta publicada: `dist`
 - Node.js: versão 20
+
+Os arquivos `robots.txt` e `sitemap.xml` já estão prontos para o Google.
 
 ## Rodar no computador
 
