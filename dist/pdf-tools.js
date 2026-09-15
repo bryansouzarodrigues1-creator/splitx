@@ -1,9 +1,9 @@
 const q = (s) => document.querySelector(s);
 const toolConfig = {
-  merge: { title: 'Unir PDF', desc: 'Combine PDFs na ordem que quiser. Use as setas para reorganizar.', accept: '.pdf,application/pdf', multiple: true, drop: 'Escolher arquivos PDF', hint: 'Selecione dois ou mais documentos', run: 'Unir documentos' },
-  images: { title: 'Imagens → PDF', desc: 'Transforme imagens em páginas A4, mantendo proporção e orientação.', accept: 'image/jpeg,image/png,image/webp', multiple: true, drop: 'Escolher imagens', hint: 'JPG, PNG ou WebP · várias imagens', run: 'Criar PDF' },
-  extract: { title: 'PDF → imagens', desc: 'Exporte todas as páginas como imagens JPG em alta qualidade.', accept: '.pdf,application/pdf', multiple: false, drop: 'Escolher um PDF', hint: 'As páginas serão reunidas em um ZIP', run: 'Converter páginas' },
-  word: { title: 'Word → PDF', desc: 'Conversão local de DOCX com texto, títulos e parágrafos. Layouts complexos podem variar.', accept: '.docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document', multiple: false, drop: 'Escolher documento Word', hint: 'Formato DOCX · motor Beta', run: 'Converter para PDF' }
+  merge: { title: 'Unir PDFs', desc: 'Junte os PDFs e organize a ordem com as setas.', accept: '.pdf,application/pdf', multiple: true, drop: 'Escolher PDFs', hint: 'Escolha dois ou mais arquivos', run: 'Unir PDFs' },
+  images: { title: 'Imagens para PDF', desc: 'Crie um PDF com imagens JPG, PNG ou WebP.', accept: 'image/jpeg,image/png,image/webp', multiple: true, drop: 'Escolher imagens', hint: 'Você pode escolher várias', run: 'Criar PDF' },
+  extract: { title: 'PDF para imagens', desc: 'Salve cada página do PDF como uma imagem JPG.', accept: '.pdf,application/pdf', multiple: false, drop: 'Escolher PDF', hint: 'As imagens serão baixadas em um ZIP', run: 'Criar imagens' },
+  word: { title: 'Word para PDF', desc: 'Transforma o texto de um DOCX em PDF. Documentos mais elaborados podem ficar diferentes.', accept: '.docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document', multiple: false, drop: 'Escolher DOCX', hint: 'A formatação pode mudar', run: 'Criar PDF' }
 };
 let activeTool = null;
 let selected = [];
@@ -33,7 +33,7 @@ const loadJsZip = () => new Promise((resolve, reject) => {
   const script = document.createElement('script');
   script.src = './vendor/jszip.min.js';
   script.onload = () => resolve(window.JSZip);
-  script.onerror = () => reject(new Error('Não foi possível carregar o motor ZIP.'));
+  script.onerror = () => reject(new Error('Não foi possível abrir a ferramenta ZIP.'));
   document.head.append(script);
 });
 
@@ -137,7 +137,7 @@ function clearResults() {
   q('#pdfResults').innerHTML = '';
 }
 
-function offerDownload(blob, filename, label = 'Arquivo pronto') {
+function offerDownload(blob, filename, label = 'Pronto para baixar') {
   const url = URL.createObjectURL(blob);
   resultUrls.push(url);
   const row = document.createElement('div');
@@ -155,17 +155,17 @@ q('#pdfRun').onclick = async () => {
   if (!activeTool || !selected.length) return;
   clearResults();
   q('#pdfRun').disabled = true;
-  setProgress(3, 'Preparando motor', 'Tudo acontece somente neste dispositivo.');
+  setProgress(3, 'Preparando', 'Seu arquivo fica no seu aparelho.');
   try {
     if (activeTool === 'merge') await mergePdfs();
     if (activeTool === 'images') await imagesToPdf();
     if (activeTool === 'extract') await pdfToImages();
     if (activeTool === 'word') await wordToPdf();
-    setProgress(100, 'Concluído', 'Seu arquivo está pronto e nenhum documento foi enviado.');
+    setProgress(100, 'Pronto', 'Seu arquivo já pode ser baixado.');
   } catch (error) {
     console.error(error);
-    q('#pdfResults').innerHTML = `<div class="pdf-error">Não foi possível processar este arquivo. Ele pode estar protegido, corrompido ou usar um recurso ainda não suportado.</div>`;
-    setProgress(0, 'Processamento interrompido', error.message || 'Verifique os arquivos e tente novamente.');
+    q('#pdfResults').innerHTML = `<div class="pdf-error">Não foi possível abrir este arquivo. Ele pode estar protegido ou danificado.</div>`;
+    setProgress(0, 'Não deu certo', error.message || 'Confira o arquivo e tente novamente.');
   } finally {
     q('#pdfRun').disabled = false;
   }
@@ -175,7 +175,7 @@ async function mergePdfs() {
   const { PDFDocument } = await loadPdfLib();
   const output = await PDFDocument.create();
   for (let i = 0; i < selected.length; i++) {
-    setProgress(8 + (i / selected.length) * 75, `Lendo PDF ${i + 1} de ${selected.length}`);
+    setProgress(8 + (i / selected.length) * 75, `Abrindo PDF ${i + 1} de ${selected.length}`);
     const source = await PDFDocument.load(await selected[i].arrayBuffer());
     const pages = await output.copyPages(source, source.getPageIndices());
     pages.forEach((page) => output.addPage(page));
@@ -298,7 +298,7 @@ async function wordToPdf() {
     y -= paragraph.heading ? 8 : 4;
     if (i % 20 === 0) setProgress(45 + (i / paragraphs.length) * 38, `Formatando parágrafo ${i + 1} de ${paragraphs.length}`);
   }
-  setProgress(90, 'Gerando PDF');
+  setProgress(90, 'Criando PDF');
   const bytes = await output.save({ useObjectStreams: true });
   const name = selected[0].name.replace(/\.docx$/i, '') + '.pdf';
   offerDownload(new Blob([bytes], { type: 'application/pdf' }), name, `${output.getPageCount()} páginas convertidas`);
