@@ -13,4 +13,4 @@ for (const [source, target] of files) {
   await copyFile(new URL(source, import.meta.url), new URL(target, import.meta.url));
 }
 
-console.log('Bibliotecas locais preparadas em dist/vendor.');
+console.log('Bibliotecas prontas.');
