@@ -1,5 +1,6 @@
 const q = (s) => document.querySelector(s);
 const toolConfig = {
+  organize: { title: 'Organizar PDF', desc: 'Mude a ordem, gire ou apague páginas antes de baixar.', accept: '.pdf,application/pdf', multiple: false, drop: 'Escolher PDF', hint: 'Tudo é feito no seu aparelho', run: 'Abrir páginas' },
   merge: { title: 'Unir PDFs', desc: 'Junte os PDFs e organize a ordem com as setas.', accept: '.pdf,application/pdf', multiple: true, drop: 'Escolher PDFs', hint: 'Escolha dois ou mais arquivos', run: 'Unir PDFs' },
   images: { title: 'Imagens para PDF', desc: 'Crie um PDF com imagens JPG, PNG ou WebP.', accept: 'image/jpeg,image/png,image/webp', multiple: true, drop: 'Escolher imagens', hint: 'Você pode escolher várias', run: 'Criar PDF' },
   extract: { title: 'PDF para imagens', desc: 'Salve cada página do PDF como uma imagem JPG.', accept: '.pdf,application/pdf', multiple: false, drop: 'Escolher PDF', hint: 'As imagens serão baixadas em um ZIP', run: 'Criar imagens' },
@@ -10,6 +11,12 @@ let selected = [];
 let resultUrls = [];
 let pdfLibPromise;
 let pdfJsPromise;
+let organizerLoadingTask = null;
+let organizerDocument = null;
+let organizerPages = [];
+let organizerRemoved = [];
+let organizerRenderId = 0;
+let organizerDragIndex = null;
 
 const formatBytes = (n) => {
   const units = ['B', 'KB', 'MB', 'GB'];
@@ -55,6 +62,7 @@ q('#pdfTools').addEventListener('click', (event) => {
 });
 
 function openTool(name) {
+  resetOrganizer();
   activeTool = name;
   selected = [];
   clearResults();
@@ -71,10 +79,14 @@ function openTool(name) {
   q('#pdfInput').value = '';
   q('#pdfRun').hidden = true;
   q('#pdfStatus').hidden = true;
+  q('#pdfDrop').hidden = false;
+  q('#pdfFileList').hidden = false;
+  q('#pdfOrganizer').hidden = true;
   renderFiles();
 }
 
 q('#pdfBack').onclick = () => {
+  resetOrganizer();
   activeTool = null;
   selected = [];
   clearResults();
@@ -161,13 +173,193 @@ q('#pdfRun').onclick = async () => {
     if (activeTool === 'images') await imagesToPdf();
     if (activeTool === 'extract') await pdfToImages();
     if (activeTool === 'word') await wordToPdf();
-    setProgress(100, 'Pronto', 'Seu arquivo já pode ser baixado.');
+    if (activeTool === 'organize') await openOrganizer();
+    if (activeTool !== 'organize') setProgress(100, 'Pronto', 'Seu arquivo já pode ser baixado.');
   } catch (error) {
     console.error(error);
     q('#pdfResults').innerHTML = `<div class="pdf-error">Não foi possível abrir este arquivo. Ele pode estar protegido ou danificado.</div>`;
     setProgress(0, 'Não deu certo', error.message || 'Confira o arquivo e tente novamente.');
   } finally {
     q('#pdfRun').disabled = false;
+  }
+};
+
+function resetOrganizer() {
+  organizerRenderId++;
+  organizerPages.forEach((page) => { if (page.thumbUrl) URL.revokeObjectURL(page.thumbUrl); });
+  organizerRemoved.forEach(({ page }) => { if (page.thumbUrl) URL.revokeObjectURL(page.thumbUrl); });
+  organizerPages = [];
+  organizerRemoved = [];
+  organizerDragIndex = null;
+  if (organizerLoadingTask) organizerLoadingTask.destroy().catch(() => {});
+  organizerLoadingTask = null;
+  organizerDocument = null;
+  const organizer = q('#pdfOrganizer');
+  if (organizer) organizer.hidden = true;
+  const pages = q('#organizerPages');
+  if (pages) pages.innerHTML = '';
+}
+
+async function openOrganizer() {
+  resetOrganizer();
+  const renderId = organizerRenderId;
+  const pdfjs = await loadPdfJs();
+  setProgress(8, 'Abrindo PDF', 'Lendo as páginas sem enviar o arquivo.');
+  organizerLoadingTask = pdfjs.getDocument({ data: new Uint8Array(await selected[0].arrayBuffer()) });
+  organizerDocument = await organizerLoadingTask.promise;
+  organizerPages = Array.from({ length: organizerDocument.numPages }, (_, originalIndex) => ({ originalIndex, rotation: 0, thumbUrl: '' }));
+  q('#pdfDrop').hidden = true;
+  q('#pdfFileList').hidden = true;
+  q('#pdfRun').hidden = true;
+  q('#pdfOrganizer').hidden = false;
+  renderOrganizer();
+
+  for (let originalIndex = 0; originalIndex < organizerPages.length; originalIndex++) {
+    if (renderId !== organizerRenderId) return;
+    setProgress(10 + (originalIndex / organizerPages.length) * 82, `Criando miniatura ${originalIndex + 1} de ${organizerPages.length}`);
+    const page = await organizerDocument.getPage(originalIndex + 1);
+    const baseViewport = page.getViewport({ scale: 1 });
+    const scale = Math.min(0.36, 170 / baseViewport.width);
+    const viewport = page.getViewport({ scale });
+    const pixelRatio = Math.min(window.devicePixelRatio || 1, 2);
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.ceil(viewport.width * pixelRatio));
+    canvas.height = Math.max(1, Math.ceil(viewport.height * pixelRatio));
+    const context = canvas.getContext('2d', { alpha: false });
+    context.fillStyle = '#fff';
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    const transform = pixelRatio === 1 ? null : [pixelRatio, 0, 0, pixelRatio, 0, 0];
+    await page.render({ canvas: null, canvasContext: context, viewport, transform, background: '#ffffff' }).promise;
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.78));
+    if (renderId !== organizerRenderId) return;
+    const pageState = organizerPages.find((item) => item.originalIndex === originalIndex)
+      || organizerRemoved.find(({ page: removedPage }) => removedPage.originalIndex === originalIndex)?.page;
+    if (pageState) {
+      pageState.thumbUrl = URL.createObjectURL(blob);
+      updateOrganizerThumbnail(organizerPages.indexOf(pageState));
+    }
+    page.cleanup();
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+  }
+  setProgress(100, 'Páginas prontas', 'Organize como quiser e toque em baixar.');
+}
+
+function renderOrganizer() {
+  const container = q('#organizerPages');
+  container.innerHTML = '';
+  organizerPages.forEach((page, index) => {
+    const tile = document.createElement('article');
+    tile.className = 'organizer-page';
+    tile.draggable = true;
+    tile.dataset.index = index;
+    tile.innerHTML = `<div class="page-preview"><div class="page-loading">CARREGANDO</div></div><div class="page-info"><strong>Página ${page.originalIndex + 1}</strong><span>posição ${index + 1}</span></div><nav><button data-left aria-label="Mover página para esquerda">←</button><button data-right aria-label="Mover página para direita">→</button><button data-rotate-left aria-label="Girar para esquerda">↶</button><button data-rotate-right aria-label="Girar para direita">↷</button><button data-delete aria-label="Apagar página">×</button></nav>`;
+    tile.addEventListener('dragstart', () => { organizerDragIndex = index; tile.classList.add('dragging'); });
+    tile.addEventListener('dragend', () => { organizerDragIndex = null; tile.classList.remove('dragging'); });
+    tile.addEventListener('dragover', (event) => { event.preventDefault(); tile.classList.add('drag-over'); });
+    tile.addEventListener('dragleave', () => tile.classList.remove('drag-over'));
+    tile.addEventListener('drop', (event) => {
+      event.preventDefault();
+      tile.classList.remove('drag-over');
+      if (organizerDragIndex === null || organizerDragIndex === index) return;
+      const [moved] = organizerPages.splice(organizerDragIndex, 1);
+      organizerPages.splice(index, 0, moved);
+      organizerDragIndex = null;
+      renderOrganizer();
+    });
+    tile.querySelector('[data-left]').onclick = () => moveOrganizerPage(index, -1);
+    tile.querySelector('[data-right]').onclick = () => moveOrganizerPage(index, 1);
+    tile.querySelector('[data-rotate-left]').onclick = () => rotateOrganizerPage(index, -90);
+    tile.querySelector('[data-rotate-right]').onclick = () => rotateOrganizerPage(index, 90);
+    tile.querySelector('[data-delete]').onclick = () => removeOrganizerPage(index);
+    container.append(tile);
+    updateOrganizerThumbnail(index);
+  });
+  updateOrganizerSummary();
+}
+
+function updateOrganizerThumbnail(index) {
+  const page = organizerPages[index];
+  const tile = q(`#organizerPages [data-index="${index}"]`);
+  if (!page || !tile) return;
+  const preview = tile.querySelector('.page-preview');
+  if (page.thumbUrl) {
+    preview.innerHTML = '<img alt="">';
+    const image = preview.querySelector('img');
+    image.src = page.thumbUrl;
+    image.alt = `Miniatura da página ${page.originalIndex + 1}`;
+    image.style.transform = `rotate(${page.rotation}deg)`;
+  }
+}
+
+function updateOrganizerSummary() {
+  const total = organizerPages.length;
+  q('#organizerCount').textContent = `${total} ${total === 1 ? 'página' : 'páginas'}`;
+  q('#organizerUndo').hidden = organizerRemoved.length === 0;
+  q('#organizerSave').disabled = total === 0;
+}
+
+function moveOrganizerPage(index, direction) {
+  const target = index + direction;
+  if (target < 0 || target >= organizerPages.length) return;
+  [organizerPages[index], organizerPages[target]] = [organizerPages[target], organizerPages[index]];
+  renderOrganizer();
+}
+
+function rotateOrganizerPage(index, amount) {
+  organizerPages[index].rotation = (organizerPages[index].rotation + amount + 360) % 360;
+  updateOrganizerThumbnail(index);
+}
+
+function removeOrganizerPage(index) {
+  const [page] = organizerPages.splice(index, 1);
+  organizerRemoved.push({ page, index });
+  renderOrganizer();
+}
+
+q('#organizerUndo').onclick = () => {
+  const removed = organizerRemoved.pop();
+  if (!removed) return;
+  organizerPages.splice(Math.min(removed.index, organizerPages.length), 0, removed.page);
+  renderOrganizer();
+};
+
+q('#organizerChange').onclick = () => {
+  resetOrganizer();
+  selected = [];
+  q('#pdfInput').value = '';
+  q('#pdfDrop').hidden = false;
+  q('#pdfFileList').hidden = false;
+  q('#pdfStatus').hidden = true;
+  renderFiles();
+};
+
+q('#organizerSave').onclick = async () => {
+  if (!selected[0] || !organizerPages.length) return;
+  clearResults();
+  q('#organizerSave').disabled = true;
+  try {
+    const { PDFDocument, degrees } = await loadPdfLib();
+    setProgress(6, 'Montando o novo PDF');
+    const source = await PDFDocument.load(await selected[0].arrayBuffer());
+    const output = await PDFDocument.create();
+    for (let index = 0; index < organizerPages.length; index++) {
+      const item = organizerPages[index];
+      setProgress(10 + (index / organizerPages.length) * 78, `Copiando página ${index + 1} de ${organizerPages.length}`);
+      const [copied] = await output.copyPages(source, [item.originalIndex]);
+      const originalRotation = copied.getRotation().angle || 0;
+      copied.setRotation(degrees((originalRotation + item.rotation + 360) % 360));
+      output.addPage(copied);
+    }
+    const bytes = await output.save({ useObjectStreams: true });
+    const name = selected[0].name.replace(/\.pdf$/i, '') + '-organizado.pdf';
+    offerDownload(new Blob([bytes], { type: 'application/pdf' }), name, `${organizerPages.length} páginas organizadas`);
+    setProgress(100, 'PDF organizado', 'O arquivo já pode ser baixado.');
+  } catch (error) {
+    console.error(error);
+    q('#pdfResults').innerHTML = `<div class="pdf-error">Não foi possível gerar o novo PDF. ${error.message || ''}</div>`;
+    setProgress(0, 'Não deu certo', 'Confira o arquivo e tente novamente.');
+  } finally {
+    q('#organizerSave').disabled = organizerPages.length === 0;
   }
 };
 
@@ -222,7 +414,8 @@ async function pdfToImages() {
   const pdfjs = await loadPdfJs();
   const JSZip = await loadJsZip();
   const documentData = new Uint8Array(await selected[0].arrayBuffer());
-  const pdf = await pdfjs.getDocument({ data: documentData }).promise;
+  const loadingTask = pdfjs.getDocument({ data: documentData });
+  const pdf = await loadingTask.promise;
   const zip = new JSZip();
   for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber++) {
     setProgress(8 + ((pageNumber - 1) / pdf.numPages) * 80, `Renderizando página ${pageNumber} de ${pdf.numPages}`);
@@ -234,7 +427,7 @@ async function pdfToImages() {
     const context = canvas.getContext('2d', { alpha: false });
     context.fillStyle = '#ffffff';
     context.fillRect(0, 0, canvas.width, canvas.height);
-    await page.render({ canvasContext: context, viewport }).promise;
+    await page.render({ canvas, viewport, background: '#ffffff' }).promise;
     const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', 0.92));
     zip.file(`pagina-${String(pageNumber).padStart(3, '0')}.jpg`, blob);
     page.cleanup();
@@ -242,7 +435,7 @@ async function pdfToImages() {
   setProgress(92, 'Empacotando imagens');
   const result = await zip.generateAsync({ type: 'blob', compression: 'STORE' });
   offerDownload(result, 'SplitX-paginas.zip', `${pdf.numPages} páginas em JPG`);
-  await pdf.destroy();
+  await loadingTask.destroy();
 }
 
 function cleanWordText(text) {

@@ -1,8 +1,9 @@
-const CACHE_NAME = 'splitx-v1';
+const CACHE_NAME = 'splitx-v2';
 const APP_FILES = [
   './',
   './index.html',
   './styles.css',
+  './organizer.css',
   './app-v2.js',
   './no-manifest.js',
   './pdf-tools.js',
